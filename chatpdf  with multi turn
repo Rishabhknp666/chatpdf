@@ -1,0 +1,124 @@
+import streamlit as st
+import pickle
+from streamlit_extras.add_vertical_space import add_vertical_space
+from PyPDF2 import PdfReader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.llms import OpenAI
+from langchain.chains.question_answering import load_qa_chain 
+import os
+from langchain.sql_database import SQLDatabase
+from langchain.agents import AgentType, initilaze_agent, load_tools
+from langchain.callbacks import StreamlitCallbackHandler
+from langchain.agents import create_sql_agent
+from langchain.agents.agent_toolkits import SQLDatabaseToolkit
+
+ 
+
+# Sidebar contents
+with st.sidebar:
+    st.title('LLM Chat App')
+    st.markdown('''
+    ## About
+    This app is an LLM-powered chatbot built using:
+     -[streamlit](https://streamlit.io/)
+    -[Langchain](https://www.langchain.com/)
+    -[OpenAI](https://openai.com/)
+                
+
+    ''')
+
+    add_vertical_space(5)
+    st.write('Made with love by [Rishabh](https://youtube.com/playlist?list=PLdMtv-iP-2mQh_6HUSQmGxn6ByOAYd4bY&si=iiyDaltdXERhOHGv )')
+
+
+
+def main():
+    #st.write("hello")
+    st.header("chat with pdf")
+
+    #upload a pdf file
+
+    pdf = st.file_uploader("upload your pdf here",type="pdf")
+    st.write(pdf.name)
+
+    if pdf is not None:
+        pdf_reader= PdfReader(pdf)
+
+        text =""
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=300,
+            length_function=len
+        )
+        chunks = text_splitter.split_text(text=text)
+         
+        #embeddings
+        
+        store_name = pdf.name[:-4]
+        embeddings=None
+
+        if os.path.exists(f"{store_name}.pkl"  ):
+            with open(f"{store_name}.pkl","rb") as f:
+                 VectorStore = pickle.load(f)
+      #st.write("embeddings loaded from the disk")
+        else:
+         st.write("upload a pdf file")     
+
+
+         embeddings = OpenAIEmbeddings() # type: ignore
+        
+         VectorStore = FAISS.from_texts(chunks,embedding=embeddings)
+         with open(f"{store_name}.pkl","wt" ) as f:
+                  pickle.dump(VectorStore,f) # type: ignore
+
+        st.write("embeddings computation completed")
+
+         #accept user question query
+        query = st.text_input("ask questions about your pdf file")
+        st.write(query)
+
+        if query: 
+         VectorStore = FAISS.from_texts(chunks,embedding=embeddings)
+         docs = VectorStore.similarity_search(query=query,k=3)
+
+         llm = OpenAI(temperature=0)
+         chain = load_qa_chain(llm=llm,chain_type="stuff")
+         response = chain.run(input_documents=docs,question=query)
+         st.write(response)
+
+        user_input = st.text_input("You:",query)
+        chat_history = st.text_area("Chat History", "", height=200)
+        def chatbot(user_input, chat_history):
+            # Split chat history into individual messages
+            chat_history_list = chat_history.split('\n')
+    
+            
+            response = "Chatbot: Your response here"
+    
+            
+            chat_history_list.append(f"You: {user_input}")
+            chat_history_list.append(response)
+    
+            
+            updated_chat_history = '\n'.join(chat_history_list)
+
+
+            return updated_chat_history, response
+
+        if st.button("Send"):
+            chat_history, response = chatbot(user_input, chat_history)
+
+        st.text_area("Chat History", chat_history, height=200)
+        st.text("Chatbot: " + response)
+
+
+#st.write(chunks)
+
+
+if __name__ == "__main__":
+    main()
